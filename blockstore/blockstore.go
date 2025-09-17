@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	s "pds/datastore"
 	i "pds/indexer"
-	s "pds/store"
 	"strings"
 	"sync"
 	"time"
@@ -40,7 +40,7 @@ const (
 // Blockstore реализует IPFS блокстор с MST бэкендом и индексатором
 type Blockstore struct {
 	blockstore.Blockstore
-	datastore s.Storage
+	datastore s.Datastore
 	indexer   *i.Indexer
 	lsys      *linking.LinkSystem
 	bS        blockservice.BlockService
@@ -58,7 +58,7 @@ var _ blockstore.Viewer = (*Blockstore)(nil)
 var _ io.Closer = (*Blockstore)(nil)
 
 // NewMSTBlockstore создает блокстор с MST бэкендом
-func NewBlockstore(ds s.Storage, indx *i.Indexer) *Blockstore {
+func NewBlockstore(ds s.Datastore, indx *i.Indexer) *Blockstore {
 	bs := &Blockstore{
 		Blockstore: blockstore.NewBlockstore(ds),
 		datastore:  ds,
@@ -92,6 +92,23 @@ func (bs *Blockstore) Put(ctx context.Context, block blocks.Block) error {
 	return nil
 }
 
+// Get получает блок
+func (bs *Blockstore) Get(ctx context.Context, c cid.Cid) (blocks.Block, error) {
+	// Сначала проверяем кеш
+	bs.mu.RLock()
+	if block, found := bs.blockCache[c.String()]; found {
+		bs.mu.RUnlock()
+		return block, nil
+	}
+	bs.mu.RUnlock()
+	block, err := bs.Blockstore.Get(ctx, c)
+	if err != nil {
+		return nil, err
+	}
+	bs.cacheBlock(block)
+	return block, nil
+}
+
 // DeleteBlock удаляет блок
 func (bs *Blockstore) DeleteBlock(ctx context.Context, c cid.Cid) error {
 	if err := bs.Blockstore.DeleteBlock(ctx, c); err != nil {
@@ -121,11 +138,13 @@ func (bs *Blockstore) AddFile(ctx context.Context, name string, data io.Reader, 
 		return cid.Undef, err
 	}
 
+	key := "unixfs:" + nd.Cid().String()
+
 	// Индексируем файл
 	if bs.indexer != nil {
 		go func() {
 			entry := &i.IndexEntry{
-				Key:         "unixfs:" + nd.Cid().String(),
+				Key:         key,
 				ContentType: detectContentType(name),
 				Size:        int64(len(nd.RawData())), // Размер метаданных, не самого файла
 				CreatedAt:   time.Now(),
@@ -139,7 +158,7 @@ func (bs *Blockstore) AddFile(ctx context.Context, name string, data io.Reader, 
 				},
 			}
 			bs.indexer.IndexEntry(entry)
-			bs.indexer.AddTags("unixfs:"+nd.Cid().String(), []string{"unixfs", "file"})
+			bs.indexer.AddTags(key, []string{"unixfs", "file"})
 		}()
 	}
 
@@ -217,8 +236,9 @@ func (bs *Blockstore) cacheBlock(block blocks.Block) {
 }
 
 func (bs *Blockstore) indexBlock(block blocks.Block) {
+	key := "block:" + block.Cid().String()
 	entry := &i.IndexEntry{
-		Key:         "block:" + block.Cid().String(),
+		Key:         key,
 		ContentType: "application/octet-stream", // Блоки это raw data
 		Size:        int64(len(block.RawData())),
 		CreatedAt:   time.Now(),
@@ -231,7 +251,7 @@ func (bs *Blockstore) indexBlock(block blocks.Block) {
 		},
 	}
 	bs.indexer.IndexEntry(entry)
-	bs.indexer.AddTags("block:"+block.Cid().String(), []string{"ipfs_block", "raw"})
+	bs.indexer.AddTags(key, []string{"ipfs_block", "raw"})
 }
 
 func detectContentType(filename string) string {
@@ -255,6 +275,76 @@ func detectContentType(filename string) string {
 		return "application/json"
 	case ".html":
 		return "text/html"
+	case ".csv":
+		return "text/csv"
+	case ".zip":
+		return "application/zip"
+	case ".tar":
+		return "application/x-tar"
+	case ".gz":
+		return "application/gzip"
+	case ".doc", ".docx":
+		return "application/msword"
+	case ".xls", ".xlsx":
+		return "application/vnd.ms-excel"
+	case ".ppt", ".pptx":
+		return "application/vnd.ms-powerpoint"
+	case ".svg":
+		return "image/svg+xml"
+	case ".wav":
+		return "audio/wav"
+	case ".flac":
+		return "audio/flac"
+	case ".ogg":
+		return "audio/ogg"
+	case ".webm":
+		return "video/webm"
+	case ".mov":
+		return "video/quicktime"
+	case ".avi":
+		return "video/x-msvideo"
+	case ".mkv":
+		return "video/x-matroska"
+	case ".epub":
+		return "application/epub+zip"
+	case ".md":
+		return "text/markdown"
+	case ".rtf":
+		return "application/rtf"
+	case ".ics":
+		return "text/calendar"
+	case ".xml":
+		return "application/xml"
+	case ".yml", ".yaml":
+		return "application/x-yaml"
+	case ".exe":
+		return "application/vnd.microsoft.portable-executable"
+	case ".apk":
+		return "application/vnd.android.package-archive"
+	case ".bin":
+		return "application/octet-stream"
+	case ".iso":
+		return "application/x-iso9660-image"
+	case ".dmg":
+		return "application/x-apple-diskimage"
+	case ".torrent":
+		return "application/x-bittorrent"
+	case ".log":
+		return "text/plain"
+	case ".ini", ".cfg", ".conf":
+		return "text/plain"
+	case ".sql":
+		return "application/sql"
+	case ".db", ".sqlite", ".sqlite3":
+		return "application/vnd.sqlite3"
+	case ".psd":
+		return "image/vnd.adobe.photoshop"
+	case ".ai":
+		return "application/postscript"
+	case ".eps":
+		return "application/postscript"
+	case ".ttf":
+		return "font/ttf"
 	default:
 		return "application/octet-stream"
 	}

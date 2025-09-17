@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path/filepath"
-	s "pds/store"
+	s "pds/datastore"
 	"strings"
 	"sync"
 	"time"
@@ -44,7 +44,7 @@ type Indexer struct {
 	db        *sql.DB
 	mu        sync.RWMutex
 	watchers  map[string]chan IndexEvent
-	datastore s.Storage
+	datastore s.Datastore
 }
 
 // IndexEvent событие изменения индекса
@@ -55,7 +55,7 @@ type IndexEvent struct {
 }
 
 // NewIndexer создает новый SQLite индексатор
-func NewIndexer(dbPath string, ds s.Storage) (*Indexer, error) {
+func NewIndexer(dbPath string, ds s.Datastore) (*Indexer, error) {
 
 	db, err := sql.Open("sqlite3", fmt.Sprintf("%s?_journal_mode=WAL&_synchronous=NORMAL&_cache_size=10000&_foreign_keys=ON", dbPath))
 	if err != nil {
@@ -179,7 +179,8 @@ func (idx *Indexer) IndexEntry(entry *IndexEntry) error {
 			updated_at = excluded.updated_at,
 			metadata = excluded.metadata,
 			data_hash = excluded.data_hash
-	`, entry.Key, entry.ContentType, entry.Size, entry.CreatedAt, entry.UpdatedAt, string(metadataJSON), entry.DataHash)
+	`, entry.Key, entry.ContentType, entry.Size, entry.CreatedAt,
+		entry.UpdatedAt, string(metadataJSON), entry.DataHash)
 
 	if err != nil {
 		return err

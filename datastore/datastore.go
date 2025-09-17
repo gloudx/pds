@@ -8,8 +8,9 @@ import (
 	bds "github.com/ipfs/go-ds-badger4"
 )
 
-// Storage ...
-type Storage interface {
+// Datastore ...
+type Datastore interface {
+
 	// Встраивание методов базового хранилища данных и его возможностей.
 	ds.Datastore
 	ds.BatchingFeature
@@ -22,7 +23,7 @@ type Storage interface {
 	Iterator(ctx context.Context, prefix ds.Key) (<-chan KeyValue, error)
 
 	// Merge ...
-	Merge(ctx context.Context, other Storage) error
+	Merge(ctx context.Context, other Datastore) error
 
 	// Clear ...
 	Clear(ctx context.Context) error
@@ -34,7 +35,12 @@ type KeyValue struct {
 	Value []byte
 }
 
-var _ Storage = (*datastorage)(nil)
+var _ ds.Datastore = (*datastorage)(nil)
+var _ ds.PersistentDatastore = (*datastorage)(nil)
+var _ ds.TxnDatastore = (*datastorage)(nil)
+var _ ds.TTLDatastore = (*datastorage)(nil)
+var _ ds.GCDatastore = (*datastorage)(nil)
+var _ ds.Batching = (*datastorage)(nil)
 
 type datastorage struct {
 	*bds.Datastore
@@ -47,7 +53,7 @@ type Options struct {
 }
 
 // NewDatastorage ...
-func NewDatastorage(path string, opts Options) (Storage, error) {
+func NewDatastorage(path string, opts Options) (Datastore, error) {
 
 	badgerDS, err := bds.NewDatastore(path, &opts.Options)
 	if err != nil {
@@ -86,7 +92,7 @@ func (s *datastorage) Iterator(ctx context.Context, prefix ds.Key) (<-chan KeyVa
 }
 
 // Merge ...
-func (s *datastorage) Merge(ctx context.Context, other Storage) error {
+func (s *datastorage) Merge(ctx context.Context, other Datastore) error {
 	batch, err := s.Batch(ctx)
 	if err != nil {
 		return err

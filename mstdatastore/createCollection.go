@@ -1,4 +1,4 @@
-package mstds
+package mstdatastore
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 )
 
 // CreateCollection создает новую коллекцию с заданным именем и метаданными.
-func (cmd *MstDs) CreateCollection(name string, metadata map[string]string) error {
+func (cmd *MstDatastore) CreateCollection(name string, metadata map[string]string) error {
 
 	cmd.mu.Lock()
 	defer cmd.mu.Unlock()
@@ -20,6 +20,7 @@ func (cmd *MstDs) CreateCollection(name string, metadata map[string]string) erro
 	}
 
 	ctx := context.Background()
+
 	collection := &Collection{
 		Name:       name,
 		CreatedAt:  time.Now(),
@@ -33,22 +34,23 @@ func (cmd *MstDs) CreateCollection(name string, metadata map[string]string) erro
 		return err
 	}
 
+	cmd.collections[name] = collection
+
+	collectionNamesData, err := json.Marshal(cmd.getCollectionNames())
+	if err != nil {
+		return err
+	}
+
+	collectionKey := datastore.NewKey(fmt.Sprintf("%s%s", collectionPrefix, name))
+
 	// Используем транзакцию если доступна
 	if txn, err := cmd.storage.NewTransaction(ctx, false); err == nil {
 		defer txn.Discard(ctx)
-
-		cmd.collections[name] = collection
-
-		collectionNamesData, err := json.Marshal(cmd.getCollectionNames())
-		if err != nil {
-			return err
-		}
 
 		if err := txn.Put(ctx, datastore.NewKey(collectionsKey), collectionNamesData); err != nil {
 			return err
 		}
 
-		collectionKey := datastore.NewKey(fmt.Sprintf("%s%s", collectionPrefix, name))
 		if err := txn.Put(ctx, collectionKey, collectionData); err != nil {
 			return err
 		}
@@ -57,18 +59,9 @@ func (cmd *MstDs) CreateCollection(name string, metadata map[string]string) erro
 	}
 
 	// Fallback на обычные операции
-	cmd.collections[name] = collection
-
-	collectionsData, err := json.Marshal(cmd.getCollectionNames())
-	if err != nil {
+	if err := cmd.storage.Put(ctx, datastore.NewKey(collectionsKey), collectionNamesData); err != nil {
 		return err
 	}
 
-	if err := cmd.storage.Put(ctx, datastore.NewKey(collectionsKey), collectionsData); err != nil {
-		return err
-	}
-
-	collectionKey := datastore.NewKey(fmt.Sprintf("%s%s", collectionPrefix, name))
-	
 	return cmd.storage.Put(ctx, collectionKey, collectionData)
 }

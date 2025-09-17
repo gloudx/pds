@@ -1,4 +1,4 @@
-package mstds
+package mstdatastore
 
 import (
 	"context"
@@ -10,8 +10,8 @@ import (
 )
 
 // DeleteCollection удаляет коллекцию и все связанные с ней данные.
-func (cmd *MstDs) DeleteCollection(name string) error {
-	
+func (cmd *MstDatastore) DeleteCollection(name string) error {
+
 	cmd.mu.Lock()
 	defer cmd.mu.Unlock()
 
@@ -52,8 +52,6 @@ func (cmd *MstDs) DeleteCollection(name string) error {
 		}
 	}
 
-	delete(cmd.collections, name)
-
 	collectionsData, err := json.Marshal(cmd.getCollectionNames())
 	if err != nil {
 		return err
@@ -63,5 +61,10 @@ func (cmd *MstDs) DeleteCollection(name string) error {
 		return err
 	}
 
-	return batch.Commit(ctx)
+	err = batch.Commit(ctx)
+	if err == nil {
+		delete(cmd.collections, name)
+	}
+
+	return err
 }
