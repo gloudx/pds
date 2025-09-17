@@ -48,19 +48,14 @@ type OperationLogEntry struct {
 type OperationLog interface {
 	// Записать операцию в лог
 	LogOperation(ctx context.Context, entry *OperationLogEntry) error
-
 	// Получить операции по диапазону HLC
 	GetOperations(ctx context.Context, fromHLC, toHLC *HybridLogicalClock) ([]*OperationLogEntry, error)
-
 	// Получить операции по транзакции
 	GetOperationsByTransaction(ctx context.Context, txnID string) ([]*OperationLogEntry, error)
-
 	// Получить последние N операций
 	GetRecentOperations(ctx context.Context, limit int) ([]*OperationLogEntry, error)
-
 	// Получить операции по коллекции
 	GetOperationsByCollection(ctx context.Context, collection string, limit int) ([]*OperationLogEntry, error)
-
 	// Компактификация лога (удаление старых записей)
 	Compact(ctx context.Context, beforeHLC *HybridLogicalClock) error
 }
@@ -96,6 +91,7 @@ func GenerateOperationID() string {
 
 // LogOperation записывает операцию в лог
 func (sol *StorageOperationLog) LogOperation(ctx context.Context, entry *OperationLogEntry) error {
+
 	sol.mu.Lock()
 	defer sol.mu.Unlock()
 
@@ -140,65 +136,9 @@ func (sol *StorageOperationLog) LogOperation(ctx context.Context, entry *Operati
 	return nil
 }
 
-// updateIndex обновляет индексы для быстрого поиска
-func (sol *StorageOperationLog) updateIndex(ctx context.Context, entry *OperationLogEntry) error {
-	// Индекс по транзакциям: _oplog_index:txn:{txn_id} -> [operation_keys]
-	if entry.TransactionID != "" {
-		txnIndexKey := fmt.Sprintf("_oplog_index:txn:%s", entry.TransactionID)
-
-		// Получаем текущий список операций транзакции
-		var operations []string
-		if data, err := sol.storage.Get(ctx, datastore.NewKey(txnIndexKey)); err == nil {
-			json.Unmarshal(data, &operations)
-		}
-
-		// Добавляем новую операцию
-		operationKey := fmt.Sprintf("%s%d:%d:%s:%s",
-			operationLogPrefix,
-			entry.HLC.physicalTime,
-			entry.HLC.logicalTime,
-			entry.HLC.nodeID,
-			entry.ID,
-		)
-		operations = append(operations, operationKey)
-
-		// Сохраняем обновленный индекс
-		indexData, _ := json.Marshal(operations)
-		sol.storage.Put(ctx, datastore.NewKey(txnIndexKey), indexData)
-	}
-
-	// Индекс по коллекциям
-	if entry.Collection != "" {
-		collIndexKey := fmt.Sprintf("_oplog_index:coll:%s", entry.Collection)
-
-		var operations []string
-		if data, err := sol.storage.Get(ctx, datastore.NewKey(collIndexKey)); err == nil {
-			json.Unmarshal(data, &operations)
-		}
-
-		operationKey := fmt.Sprintf("%s%d:%d:%s:%s",
-			operationLogPrefix,
-			entry.HLC.physicalTime,
-			entry.HLC.logicalTime,
-			entry.HLC.nodeID,
-			entry.ID,
-		)
-		operations = append(operations, operationKey)
-
-		// Ограничиваем размер индекса (последние 1000 операций)
-		if len(operations) > 1000 {
-			operations = operations[len(operations)-1000:]
-		}
-
-		indexData, _ := json.Marshal(operations)
-		sol.storage.Put(ctx, datastore.NewKey(collIndexKey), indexData)
-	}
-
-	return nil
-}
-
 // GetOperations получает операции в диапазоне HLC
 func (sol *StorageOperationLog) GetOperations(ctx context.Context, fromHLC, toHLC *HybridLogicalClock) ([]*OperationLogEntry, error) {
+
 	sol.mu.RLock()
 	defer sol.mu.RUnlock()
 
@@ -391,6 +331,64 @@ func (sol *StorageOperationLog) Compact(ctx context.Context, beforeHLC *HybridLo
 }
 
 // Вспомогательные методы
+
+// updateIndex обновляет индексы для быстрого поиска
+func (sol *StorageOperationLog) updateIndex(ctx context.Context, entry *OperationLogEntry) error {
+
+	// Индекс по транзакциям: _oplog_index:txn:{txn_id} -> [operation_keys]
+	if entry.TransactionID != "" {
+		txnIndexKey := fmt.Sprintf("_oplog_index:txn:%s", entry.TransactionID)
+
+		// Получаем текущий список операций транзакции
+		var operations []string
+		if data, err := sol.storage.Get(ctx, datastore.NewKey(txnIndexKey)); err == nil {
+			json.Unmarshal(data, &operations)
+		}
+
+		// Добавляем новую операцию
+		operationKey := fmt.Sprintf("%s%d:%d:%s:%s",
+			operationLogPrefix,
+			entry.HLC.physicalTime,
+			entry.HLC.logicalTime,
+			entry.HLC.nodeID,
+			entry.ID,
+		)
+		operations = append(operations, operationKey)
+
+		// Сохраняем обновленный индекс
+		indexData, _ := json.Marshal(operations)
+		sol.storage.Put(ctx, datastore.NewKey(txnIndexKey), indexData)
+	}
+
+	// Индекс по коллекциям
+	if entry.Collection != "" {
+		collIndexKey := fmt.Sprintf("_oplog_index:coll:%s", entry.Collection)
+
+		var operations []string
+		if data, err := sol.storage.Get(ctx, datastore.NewKey(collIndexKey)); err == nil {
+			json.Unmarshal(data, &operations)
+		}
+
+		operationKey := fmt.Sprintf("%s%d:%d:%s:%s",
+			operationLogPrefix,
+			entry.HLC.physicalTime,
+			entry.HLC.logicalTime,
+			entry.HLC.nodeID,
+			entry.ID,
+		)
+		operations = append(operations, operationKey)
+
+		// Ограничиваем размер индекса (последние 1000 операций)
+		if len(operations) > 1000 {
+			operations = operations[len(operations)-1000:]
+		}
+
+		indexData, _ := json.Marshal(operations)
+		sol.storage.Put(ctx, datastore.NewKey(collIndexKey), indexData)
+	}
+
+	return nil
+}
 
 func (sol *StorageOperationLog) getOperationsByKeys(ctx context.Context, keys []string) ([]*OperationLogEntry, error) {
 	var operations []*OperationLogEntry

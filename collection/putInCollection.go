@@ -1,4 +1,4 @@
-package mstdatastore
+package collection
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 )
 
 // PutInCollection добавляет элемент в коллекцию
-func (cmd *MstDatastore) PutInCollection(ctx context.Context, collectionName string, key datastore.Key, value []byte) error {
+func (cmd *CollectionManager) PutInCollection(ctx context.Context, collectionName string, key datastore.Key, value []byte) error {
 
 	cmd.mu.Lock()
 	defer cmd.mu.Unlock()
@@ -37,7 +37,7 @@ func (cmd *MstDatastore) PutInCollection(ctx context.Context, collectionName str
 	return cmd.putInCollectionWithBatch(ctx, batch, collectionName, k, value, collection)
 }
 
-func (cmd *MstDatastore) putInCollectionWithTxn(ctx context.Context, txn datastore.Txn, collectionName, k string, value []byte, collection *Collection) error {
+func (cmd *CollectionManager) putInCollectionWithTxn(ctx context.Context, txn datastore.Txn, collectionName, k string, value []byte, collection *Collection) error {
 
 	// Сохраняем данные
 	dataKey := datastore.NewKey(fmt.Sprintf("%s%s%s%s", collectionPrefix, collectionName, collectionDataKey, k))
@@ -92,7 +92,7 @@ func (cmd *MstDatastore) putInCollectionWithTxn(ctx context.Context, txn datasto
 	return txn.Commit(ctx)
 }
 
-func (cmd *MstDatastore) putInCollectionWithBatch(ctx context.Context, batch datastore.Batch, collectionName, k string, value []byte, collection *Collection) error {
+func (cmd *CollectionManager) putInCollectionWithBatch(ctx context.Context, batch datastore.Batch, collectionName, k string, value []byte, collection *Collection) error {
 
 	leafKey := datastore.NewKey(fmt.Sprintf("%s%s%s%s", collectionPrefix, collectionName, collectionLeafKey, k))
 

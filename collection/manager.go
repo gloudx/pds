@@ -1,7 +1,6 @@
-package mstdatastore
+package collection
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -15,7 +14,7 @@ import (
 )
 
 const (
-	collectionsKey    = "_collections"
+	// collectionsKey    = "_collections"
 	collectionPrefix  = "_collection:"
 	collectionRootKey = ":root"
 	collectionDataKey = ":data:"
@@ -57,61 +56,57 @@ type KeyValue struct {
 	Value []byte
 }
 
-var _ datastore.Batching = (*MstDatastore)(nil)
-
-// MstDatastore БЕЗ cmd.leaves в памяти
-type MstDatastore struct {
+// CollectionManager управляет коллекциями
+type CollectionManager struct {
 	storage     s.Datastore
 	collections map[string]*Collection // только метаданные коллекций
 	mu          sync.RWMutex
 }
 
-// NewMstDatastore создает новый memory-efficient datastore
-func NewMstDatastore(storage s.Datastore) (*MstDatastore, error) {
-	cmd := &MstDatastore{
+// NewCollectionManager создает новый менеджер коллекций
+func NewCollectionManager(storage s.Datastore) (*CollectionManager, error) {
+	cm := &CollectionManager{
 		storage:     storage,
 		collections: make(map[string]*Collection),
 	}
-	// Загружаем только метаданные коллекций (не листья!)
-	err := cmd.loadCollections(context.Background())
-	return cmd, err
+	err := cm.loadCollections(context.Background())
+	return cm, err
 }
 
-// HasCollection проверяет существование коллекции
-func (cmd *MstDatastore) HasCollection(name string) bool {
-	cmd.mu.RLock()
-	defer cmd.mu.RUnlock()
-	_, exists := cmd.collections[name]
-	return exists
-}
-
-// === ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ ===
-
-func (cmd *MstDatastore) loadCollections(ctx context.Context) error {
-	data, err := cmd.storage.Get(ctx, datastore.NewKey(collectionsKey))
-	if err == datastore.ErrNotFound {
-		return cmd.CreateCollection("_system", map[string]string{
-			"description": "Default collection",
-		})
-	}
+func (cm *CollectionManager) loadCollections(ctx context.Context) error {
+	collections, err := cm.storage.Keys(ctx, datastore.NewKey(collectionPrefix))
 	if err != nil {
 		return err
 	}
-	var collectionNames []string
-	if err := json.Unmarshal(data, &collectionNames); err != nil {
-		return err
-	}
-	// Загружаем ТОЛЬКО метаданные коллекций (не листья!)
-	for _, name := range collectionNames {
-		if err := cmd.loadCollectionMetadata(ctx, name); err != nil {
+	for _, col := range collections {
+		if err := cm.loadCollectionMetadata(ctx, col); err != nil {
 			return err
 		}
+	}
+	if len(cm.collections) == 0 {
+		return cm.CreateCollection("_system", map[string]string{
+			"description": "Default collection",
+		})
 	}
 	return nil
 }
 
+func (cmd *CollectionManager) loadCollectionMetadata(ctx context.Context, k datastore.Key) error {
+	data, err := cmd.storage.Get(ctx, k)
+	if err != nil {
+		return err
+	}
+	var collection Collection
+	if err := json.Unmarshal(data, &collection); err != nil {
+		return err
+	}
+	name := k.String()[len(collectionPrefix):]
+	cmd.collections[name] = &collection
+	return nil
+}
+
 // buildCollectionTreeFromStorage строит Merkle Tree читая листья из Storage
-func (cmd *MstDatastore) buildCollectionTreeFromStorage(ctx context.Context, collectionName string) ([]byte, error) {
+func (cmd *CollectionManager) buildCollectionTreeFromStorage(ctx context.Context, collectionName string) ([]byte, error) {
 
 	fmt.Printf("🔍 Строим дерево для коллекции '%s' (читаем из Storage)\n", collectionName)
 
@@ -216,58 +211,16 @@ func (cmd *MstDatastore) buildCollectionTreeFromStorage(ctx context.Context, col
 	return rootHash, nil
 }
 
-func (cmd *MstDatastore) loadCollectionMetadata(ctx context.Context, name string) error {
-	collectionKey := datastore.NewKey(fmt.Sprintf("%s%s", collectionPrefix, name))
-	data, err := cmd.storage.Get(ctx, collectionKey)
-	if err != nil {
-		return err
-	}
-	var collection Collection
-	if err := json.Unmarshal(data, &collection); err != nil {
-		return err
-	}
-	cmd.collections[name] = &collection
-	// НЕ загружаем листья в память!
-	return nil
-}
-
-func (cmd *MstDatastore) getCollectionNames() []string {
-	names := make([]string, 0, len(cmd.collections))
-	for name := range cmd.collections {
-		names = append(names, name)
-	}
-	sort.Strings(names)
-	return names
-}
-
-func (cmd *MstDatastore) hashLeaf(key string, value []byte) []byte {
+func (cmd *CollectionManager) hashLeaf(key string, value []byte) []byte {
 	hasher := blake3.New(32, nil)
 	hasher.Write([]byte(key))
 	hasher.Write(value)
 	return hasher.Sum(nil)
 }
 
-func (cmd *MstDatastore) hashPair(left, right []byte) []byte {
+func (cmd *CollectionManager) hashPair(left, right []byte) []byte {
 	hasher := blake3.New(32, nil)
 	hasher.Write(left)
 	hasher.Write(right)
 	return hasher.Sum(nil)
-}
-
-func (cmd *MstDatastore) verifyProofStatic(proof *CollectionMerkleProof, rootHash []byte) bool {
-	expectedLeafHash := cmd.hashLeaf(proof.Key, proof.Value)
-	if !bytes.Equal(proof.LeafHash, expectedLeafHash) {
-		return false
-	}
-
-	currentHash := proof.LeafHash
-	for i, siblingHash := range proof.Path {
-		if proof.Positions[i] {
-			currentHash = cmd.hashPair(currentHash, siblingHash)
-		} else {
-			currentHash = cmd.hashPair(siblingHash, currentHash)
-		}
-	}
-
-	return bytes.Equal(currentHash, rootHash)
 }

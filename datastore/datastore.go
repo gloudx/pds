@@ -27,6 +27,9 @@ type Datastore interface {
 
 	// Clear ...
 	Clear(ctx context.Context) error
+
+	//Keys ...
+	Keys(ctx context.Context, prefix ds.Key) ([]ds.Key, error)
 }
 
 // KeyValue - это простая структура для хранения пары ключ-значение.
@@ -125,4 +128,17 @@ func (s *datastorage) Clear(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+// Keys ...
+func (s *datastorage) Keys(ctx context.Context, prefix ds.Key) ([]ds.Key, error) {
+	var keys []ds.Key
+	it, err := s.Iterator(ctx, prefix)
+	if err != nil {
+		return nil, err
+	}
+	for kv := range it {
+		keys = append(keys, kv.Key)
+	}
+	return keys, nil
 }
